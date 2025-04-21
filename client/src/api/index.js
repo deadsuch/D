@@ -315,7 +315,8 @@ export const statsAPI = {
   }
 };
 
-export default {
+// Объединение всех API в один объект
+const apiService = {
   authAPI,
   eventsAPI,
   bookingsAPI,
@@ -325,4 +326,6 @@ export default {
   locationAPI,
   calendarAPI,
   statsAPI
-}; 
+};
+
+export default apiService; 

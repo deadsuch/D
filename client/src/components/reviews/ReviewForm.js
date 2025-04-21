@@ -1,13 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { reviewsAPI, eventsAPI } from '../../api';
-import { useAuth } from '../../context/AuthContext';
 import StarRating from './StarRating';
 
 const ReviewForm = () => {
   const { id: eventId } = useParams();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
   
   const [reviewId, setReviewId] = useState(null);
   const [isEdit, setIsEdit] = useState(false);

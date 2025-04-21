@@ -15,16 +15,16 @@ const Footer = () => {
               концерты, спектакли, мастер-классы и многое другое.
             </p>
             <div className="social-links d-flex gap-3">
-              <a href="#" className="text-secondary" title="Facebook">
+              <a href="https://facebook.com" className="text-secondary" title="Facebook">
                 <i className="bi bi-facebook fs-5"></i>
               </a>
-              <a href="#" className="text-secondary" title="Instagram">
+              <a href="https://instagram.com" className="text-secondary" title="Instagram">
                 <i className="bi bi-instagram fs-5"></i>
               </a>
-              <a href="#" className="text-secondary" title="Twitter">
+              <a href="https://twitter.com" className="text-secondary" title="Twitter">
                 <i className="bi bi-twitter fs-5"></i>
               </a>
-              <a href="#" className="text-secondary" title="YouTube">
+              <a href="https://youtube.com" className="text-secondary" title="YouTube">
                 <i className="bi bi-youtube fs-5"></i>
               </a>
             </div>

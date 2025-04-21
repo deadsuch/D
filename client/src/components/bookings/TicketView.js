@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { bookingsAPI, eventsAPI } from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -9,7 +9,6 @@ import html2canvas from 'html2canvas';
 const TicketView = () => {
   const { id: bookingId } = useParams();
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
   
   const [booking, setBooking] = useState(null);
   const [event, setEvent] = useState(null);

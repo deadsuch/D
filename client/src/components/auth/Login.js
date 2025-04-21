@@ -16,14 +16,14 @@ const Login = () => {
   const [formErrors, setFormErrors] = useState({});
 
   // Получаем адрес, с которого был редирект (если есть)
-  const from = location.state?.from || '/';
+  const [from, setFrom] = useState(location.state?.from || '/');
   
   // Получаем redirect из query params
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const redirect = params.get('redirect');
     if (redirect) {
-      from = redirect;
+      setFrom(redirect);
     }
   }, [location]);
 

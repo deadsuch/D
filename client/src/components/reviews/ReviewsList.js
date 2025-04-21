@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { reviewsAPI, eventsAPI } from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import StarRating from './StarRating';
 
 const ReviewsList = () => {
   const { id: eventId } = useParams();
-  const navigate = useNavigate();
   const { currentUser } = useAuth();
   
   const [event, setEvent] = useState(null);
