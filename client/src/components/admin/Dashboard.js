@@ -20,7 +20,7 @@ const Dashboard = () => {
     
     const fetchStats = async () => {
       try {
-        const data = await statsAPI.get();
+        const data = await statsAPI.getOverview();
         setStats(data);
       } catch (err) {
         setError(err.message);

@@ -9,7 +9,11 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = 'event-booking-secret-key'; // В реальном проекте храните в .env
 
 // Middleware
-app.use(cors());
+// Настраиваем CORS для работы как с локальной разработкой, так и с Docker
+app.use(cors({
+  origin: ["http://localhost:3000", "http://localhost:80", "http://localhost"],
+  credentials: true
+}));
 app.use(express.json());
 
 // Создание и подключение к БД

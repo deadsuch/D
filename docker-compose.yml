@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Сервер (бэкенд) на Node.js
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: event-booking-server
+    restart: unless-stopped
+    volumes:
+      # Монтируем базу данных для сохранения данных между запусками
+      - ./server/database.sqlite:/app/database.sqlite
+      # Монтируем исходный код для разработки (при необходимости)
+      # - ./server:/app
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+    ports:
+      # Экспозим порт для доступа напрямую
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/api/events"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Клиент (фронтенд) на React
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: event-booking-client
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      # Монтируем конфигурацию окружения
+      - ./client/public/env-config.js:/usr/share/nginx/html/env-config.js
+    depends_on:
+      server:
+        condition: service_healthy
+
+networks:
+  default:
+    name: event-booking-network 

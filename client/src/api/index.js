@@ -1,5 +1,23 @@
 // API для взаимодействия с сервером
-const API_URL = 'http://localhost:5000/api';
+// Используем конфигурацию из window.ENV если доступна, иначе определяем по домену
+let API_URL;
+
+if (window.ENV && window.ENV.API_URL) {
+  // Используем URL из конфигурации окружения
+  API_URL = window.ENV.API_URL;
+} else {
+  // Запасной вариант - определяем по домену
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    // Режим разработки - используем полный URL
+    API_URL = 'http://localhost:5000/api';
+  } else {
+    // Продакшн или Docker - используем относительный путь
+    API_URL = '/api';
+  }
+}
+
+// Для отладки
+console.log('API URL:', API_URL);
 
 // Получение токена из localStorage
 const getToken = () => localStorage.getItem('token');
@@ -23,14 +41,31 @@ const fetchWithAuth = async (url, options = {}) => {
     headers
   };
 
-  const response = await fetch(`${API_URL}${url}`, config);
-  const data = await response.json();
+  try {
+    const response = await fetch(`${API_URL}${url}`, config);
+    
+    // Проверяем код статуса ответа
+    if (!response.ok) {
+      // Пытаемся получить детали ошибки из JSON
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        // Если не можем получить JSON, используем текст ответа
+        const errorText = await response.text();
+        throw new Error(`Ошибка ${response.status}: ${errorText}`);
+      }
+      throw new Error(errorData.error || `Ошибка сервера: ${response.status}`);
+    }
 
-  if (!response.ok) {
-    throw new Error(data.error || 'Ошибка сервера');
+    // Пытаемся разобрать JSON-ответ
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Улучшенная обработка ошибок
+    console.error('API Error:', error);
+    throw error;
   }
-
-  return data;
 };
 
 // Аутентификация
@@ -201,7 +236,7 @@ export const reviewsAPI = {
     return fetchWithAuth('/reviews/user');
   },
   
-  // Добавление отзыва
+  // Создание нового отзыва
   create: (reviewData) => {
     return fetchWithAuth('/reviews', {
       method: 'POST',
@@ -307,11 +342,42 @@ export const calendarAPI = {
   }
 };
 
-// Статистика (только для админа)
+// Статистика (только для администраторов)
 export const statsAPI = {
-  // Получение статистики
-  get: () => {
+  // Получение общей статистики
+  getOverview: () => {
     return fetchWithAuth('/stats');
+  },
+  
+  // Получение статистики по мероприятиям
+  getEventStats: () => {
+    return fetchWithAuth('/stats/events');
+  },
+  
+  // Получение статистики по пользователям
+  getUserStats: () => {
+    return fetchWithAuth('/stats/users');
+  },
+  
+  // Получение финансовой статистики
+  getFinancialStats: () => {
+    return fetchWithAuth('/stats/financial');
+  }
+};
+
+// Настройки приложения
+export const settingsAPI = {
+  // Получение глобальных настроек
+  get: () => {
+    return fetchWithAuth('/settings');
+  },
+  
+  // Обновление настроек (только для администраторов)
+  update: (settingsData) => {
+    return fetchWithAuth('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settingsData)
+    });
   }
 };
 
@@ -325,7 +391,8 @@ const apiService = {
   chatAPI,
   locationAPI,
   calendarAPI,
-  statsAPI
+  statsAPI,
+  settingsAPI
 };
 
 export default apiService; 
