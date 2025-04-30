@@ -82,17 +82,36 @@ const BookingEditForm = () => {
         throw new Error(`Недостаточно мест. Доступно: ${event.available_seats}`);
       }
       
-      // Обновляем бронирование
-      await bookingsAPI.update(id, {
+      // Обновляем бронирование, явно преобразуя все данные в правильные типы
+      const updatedBooking = await bookingsAPI.update(id, {
         tickets_count: numericTicketsCount,
-        status: formData.status
+        status: formData.status || 'confirmed'
       });
+      
+      console.log('Ответ сервера:', updatedBooking);
+      
+      // Обновляем локальную информацию о бронировании
+      setBooking({
+        ...booking,
+        tickets_count: numericTicketsCount,
+        status: formData.status,
+        total_price: numericTicketsCount * event.price
+      });
+      
+      // Обновляем локальную информацию о мероприятии
+      if (additionalTickets !== 0) {
+        setEvent({
+          ...event,
+          available_seats: event.available_seats - additionalTickets
+        });
+      }
       
       setSuccess('Бронирование успешно обновлено');
       // Перенаправляем на страницу списка бронирований через 2 секунды
       setTimeout(() => navigate('/bookings'), 2000);
     } catch (err) {
-      setError(err.message);
+      console.error('Ошибка при обновлении бронирования:', err);
+      setError(err.message || 'Произошла ошибка при обновлении бронирования');
     } finally {
       setSubmitting(false);
     }

@@ -67,6 +67,38 @@ const TicketView = () => {
     return `EB-${bookingId.toString().padStart(6, '0')}-${userId.toString().padStart(4, '0')}`;
   };
   
+  // Получение текста статуса бронирования
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'confirmed':
+        return 'Подтверждено';
+      case 'cancelled':
+        return 'Отменено';
+      case 'completed':
+        return 'Завершено';
+      case 'pending':
+        return 'Ожидает подтверждения';
+      default:
+        return 'Подтверждено';
+    }
+  };
+  
+  // Получение класса для отображения статуса
+  const getStatusBadgeClass = (status) => {
+    switch (status) {
+      case 'confirmed':
+        return 'bg-success';
+      case 'cancelled':
+        return 'bg-danger';
+      case 'completed':
+        return 'bg-info';
+      case 'pending':
+        return 'bg-warning';
+      default:
+        return 'bg-success';
+    }
+  };
+  
   // Скачивание билета в PDF
   const downloadTicketPDF = async () => {
     if (!ticketRef.current) return;
@@ -225,6 +257,14 @@ const TicketView = () => {
                     <div className="col-sm-6 mb-3">
                       <label className="text-muted mb-1 small">Стоимость</label>
                       <p className="mb-0">{booking.total_price} ₽</p>
+                    </div>
+                    <div className="col-sm-6 mb-3">
+                      <label className="text-muted mb-1 small">Статус</label>
+                      <p className="mb-0">
+                        <span className={`badge ${getStatusBadgeClass(booking.status)}`}>
+                          {getStatusText(booking.status)}
+                        </span>
+                      </p>
                     </div>
                   </div>
                   

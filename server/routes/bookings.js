@@ -1,7 +1,141 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../database');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
+
+// Получение всех бронирований
+router.get('/', authenticateToken, (req, res) => {
+  const userId = req.user.id;
+  const isAdmin = req.user.role === 'admin';
+  
+  // Если админ, показываем все бронирования, иначе только пользователя
+  const query = isAdmin
+    ? `SELECT b.*, e.title as event_title, u.name as user_name 
+       FROM bookings b 
+       JOIN events e ON b.event_id = e.id 
+       JOIN users u ON b.user_id = u.id 
+       ORDER BY b.booking_date DESC`
+    : `SELECT b.*, e.title as event_title 
+       FROM bookings b 
+       JOIN events e ON b.event_id = e.id 
+       WHERE b.user_id = ? 
+       ORDER BY b.booking_date DESC`;
+  
+  const params = isAdmin ? [] : [userId];
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      console.error('Ошибка при получении бронирований:', err);
+      return res.status(500).json({ message: 'Ошибка сервера при получении бронирований' });
+    }
+    res.json(rows);
+  });
+});
+
+// Получение бронирований пользователя
+router.get('/user', authenticateToken, (req, res) => {
+  const userId = req.user.id;
+  
+  const query = `
+    SELECT b.*, e.title as event_title, e.date_time as event_date, e.location as event_location
+    FROM bookings b 
+    JOIN events e ON b.event_id = e.id 
+    WHERE b.user_id = ? 
+    ORDER BY b.booking_date DESC
+  `;
+  
+  db.all(query, [userId], (err, rows) => {
+    if (err) {
+      console.error('Ошибка при получении бронирований пользователя:', err);
+      return res.status(500).json({ message: 'Ошибка сервера при получении бронирований' });
+    }
+    res.json(rows);
+  });
+});
+
+// Создание нового бронирования
+router.post('/', authenticateToken, (req, res) => {
+  try {
+    const { event_id, tickets_count } = req.body;
+    const user_id = req.user.id;
+
+    if (!event_id || !tickets_count || tickets_count <= 0) {
+      return res.status(400).json({ message: 'Некорректные данные для бронирования' });
+    }
+
+    // Получаем информацию о мероприятии
+    db.get('SELECT * FROM events WHERE id = ?', [event_id], (err, event) => {
+      if (err) {
+        console.error('Ошибка при получении мероприятия:', err);
+        return res.status(500).json({ message: 'Ошибка сервера при создании бронирования' });
+      }
+      if (!event) {
+        return res.status(404).json({ message: 'Мероприятие не найдено' });
+      }
+      if (event.available_seats < tickets_count) {
+        return res.status(400).json({ message: `Недостаточно свободных мест. Доступно: ${event.available_seats}` });
+      }
+
+      // Обновляем количество доступных мест
+      const newAvailableSeats = event.available_seats - tickets_count;
+      const totalPrice = event.price * tickets_count;
+
+      db.run(
+        'UPDATE events SET available_seats = ? WHERE id = ?',
+        [newAvailableSeats, event_id],
+        function (err) {
+          if (err) {
+            console.error('Ошибка при обновлении доступных мест:', err);
+            return res.status(500).json({ message: 'Ошибка сервера при создании бронирования' });
+          }
+
+          // Создаем бронирование
+          db.run(
+            'INSERT INTO bookings (user_id, event_id, tickets_count, total_price) VALUES (?, ?, ?, ?)',
+            [user_id, event_id, tickets_count, totalPrice],
+            function (err) {
+              if (err) {
+                console.error('Ошибка при создании бронирования:', err);
+                return res.status(500).json({ message: 'Ошибка сервера при создании бронирования' });
+              }
+
+              // Получаем созданное бронирование для возврата
+              db.get(
+                `SELECT b.*, e.title as event_title 
+                 FROM bookings b
+                 JOIN events e ON b.event_id = e.id
+                 WHERE b.id = ?`,
+                [this.lastID],
+                (err, booking) => {
+                  if (err) {
+                    console.error('Ошибка при получении созданного бронирования:', err);
+                    return res.status(201).json({
+                      message: 'Бронирование успешно создано',
+                      id: this.lastID,
+                      user_id,
+                      event_id,
+                      tickets_count,
+                      total_price: totalPrice,
+                      event_title: event.title
+                    });
+                  }
+                  
+                  res.status(201).json({
+                    message: 'Бронирование успешно создано',
+                    ...booking
+                  });
+                }
+              );
+            }
+          );
+        }
+      );
+    });
+  } catch (error) {
+    console.error('Ошибка при создании бронирования:', error);
+    res.status(500).json({ message: 'Ошибка сервера при создании бронирования' });
+  }
+});
 
 // Получение бронирования по ID
 router.get('/:id', authenticateToken, (req, res) => {
@@ -43,6 +177,56 @@ router.get('/:id', authenticateToken, (req, res) => {
     
     res.json(booking);
   });
+});
+
+// Отмена бронирования
+router.delete('/:id', authenticateToken, (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    
+    // Получаем бронирование
+    const bookingQuery = isAdmin
+      ? 'SELECT * FROM bookings WHERE id = ?'
+      : 'SELECT * FROM bookings WHERE id = ? AND user_id = ?';
+    
+    const bookingParams = isAdmin ? [id] : [id, userId];
+    
+    db.get(bookingQuery, bookingParams, (err, booking) => {
+      if (err) {
+        console.error('Ошибка при получении бронирования:', err);
+        return res.status(500).json({ message: 'Ошибка сервера при отмене бронирования' });
+      }
+      if (!booking) {
+        return res.status(404).json({ message: 'Бронирование не найдено' });
+      }
+      
+      // Возвращаем билеты в доступные места
+      db.run(
+        'UPDATE events SET available_seats = available_seats + ? WHERE id = ?',
+        [booking.tickets_count, booking.event_id],
+        (err) => {
+          if (err) {
+            console.error('Ошибка при обновлении мест:', err);
+            return res.status(500).json({ message: 'Ошибка сервера при отмене бронирования' });
+          }
+          
+          // Удаляем бронирование
+          db.run('DELETE FROM bookings WHERE id = ?', [id], function (err) {
+            if (err) {
+              console.error('Ошибка при удалении бронирования:', err);
+              return res.status(500).json({ message: 'Ошибка сервера при отмене бронирования' });
+            }
+            res.json({ message: 'Бронирование успешно отменено' });
+          });
+        }
+      );
+    });
+  } catch (error) {
+    console.error('Ошибка при отмене бронирования:', error);
+    res.status(500).json({ message: 'Ошибка сервера при отмене бронирования' });
+  }
 });
 
 // Отправка билета на email
@@ -113,86 +297,144 @@ router.post('/:id/send-ticket', authenticateToken, (req, res) => {
 
 // Обновление бронирования (только для администраторов)
 router.put('/:id', authenticateToken, (req, res) => {
-  const { id } = req.params;
-  const { tickets_count, status } = req.body;
-  const isAdmin = req.user.role === 'admin';
-  
-  // Проверяем, что пользователь является администратором
-  if (!isAdmin) {
-    return res.status(403).json({ message: 'Доступ запрещен. Требуются права администратора.' });
-  }
-  
-  // Убедимся, что бронирование существует
-  db.get('SELECT * FROM bookings WHERE id = ?', [id], (err, booking) => {
-    if (err) {
-      console.error('Ошибка при получении бронирования:', err);
-      return res.status(500).json({ message: 'Ошибка сервера при обновлении бронирования' });
+  try {
+    const { id } = req.params;
+    const { tickets_count, status } = req.body;
+    const isAdmin = req.user.role === 'admin';
+    
+    // Проверяем, что пользователь является администратором
+    if (!isAdmin) {
+      return res.status(403).json({ message: 'Доступ запрещен. Требуются права администратора.' });
     }
     
-    if (!booking) {
-      return res.status(404).json({ message: 'Бронирование не найдено' });
+    // Проверяем валидность входных данных
+    if (!tickets_count || isNaN(parseInt(tickets_count)) || parseInt(tickets_count) <= 0) {
+      return res.status(400).json({ message: 'Количество билетов должно быть положительным числом' });
     }
     
-    // Получаем информацию о мероприятии для расчета общей стоимости
-    db.get('SELECT price, available_seats FROM events WHERE id = ?', [booking.event_id], (err, event) => {
+    // Убедимся, что бронирование существует
+    db.get('SELECT * FROM bookings WHERE id = ?', [id], (err, booking) => {
       if (err) {
-        console.error('Ошибка при получении данных мероприятия:', err);
+        console.error('Ошибка при получении бронирования:', err);
         return res.status(500).json({ message: 'Ошибка сервера при обновлении бронирования' });
       }
       
-      if (!event) {
-        return res.status(404).json({ message: 'Мероприятие не найдено' });
+      if (!booking) {
+        return res.status(404).json({ message: 'Бронирование не найдено' });
       }
       
-      // Проверяем доступность мест, если количество билетов увеличивается
-      const additionalTickets = tickets_count - booking.tickets_count;
-      if (additionalTickets > 0 && additionalTickets > event.available_seats) {
-        return res.status(400).json({ 
-          message: `Недостаточно мест. Доступно: ${event.available_seats}` 
-        });
-      }
-      
-      // Рассчитываем новую общую стоимость
-      const total_price = tickets_count * event.price;
-      
-      // Обновляем бронирование
-      const updateBookingQuery = `
-        UPDATE bookings 
-        SET tickets_count = ?, 
-            status = ?,
-            total_price = ?
-        WHERE id = ?
-      `;
-      
-      db.run(updateBookingQuery, [tickets_count, status, total_price, id], function(err) {
+      // Получаем информацию о мероприятии для расчета общей стоимости
+      db.get('SELECT price, available_seats FROM events WHERE id = ?', [booking.event_id], (err, event) => {
         if (err) {
-          console.error('Ошибка при обновлении бронирования:', err);
+          console.error('Ошибка при получении данных мероприятия:', err);
           return res.status(500).json({ message: 'Ошибка сервера при обновлении бронирования' });
         }
         
-        // Обновляем доступные места для мероприятия
-        if (additionalTickets !== 0) {
-          const updateEventQuery = `
-            UPDATE events 
-            SET available_seats = available_seats - ? 
-            WHERE id = ?
-          `;
-          
-          db.run(updateEventQuery, [additionalTickets, booking.event_id], function(err) {
-            if (err) {
-              console.error('Ошибка при обновлении доступных мест:', err);
-              // Продолжаем выполнение, так как бронирование уже обновлено
-            }
+        if (!event) {
+          return res.status(404).json({ message: 'Мероприятие не найдено' });
+        }
+        
+        // Проверяем доступность мест, если количество билетов увеличивается
+        const numericTicketsCount = parseInt(tickets_count);
+        const additionalTickets = numericTicketsCount - booking.tickets_count;
+        if (additionalTickets > 0 && additionalTickets > event.available_seats) {
+          return res.status(400).json({ 
+            message: `Недостаточно мест. Доступно: ${event.available_seats}` 
           });
         }
         
-        res.status(200).json({ 
-          message: 'Бронирование успешно обновлено',
-          booking_id: id
+        // Проверяем валидность статуса
+        const validStatuses = ['pending', 'confirmed', 'cancelled', 'completed'];
+        if (status && !validStatuses.includes(status)) {
+          return res.status(400).json({
+            message: `Недопустимый статус. Допустимые значения: ${validStatuses.join(', ')}`
+          });
+        }
+        
+        // Рассчитываем новую общую стоимость
+        const total_price = numericTicketsCount * event.price;
+        
+        // Обновляем бронирование
+        const updateBookingQuery = `
+          UPDATE bookings 
+          SET tickets_count = ?, 
+              status = ?,
+              total_price = ?
+          WHERE id = ?
+        `;
+        
+        db.run(updateBookingQuery, [numericTicketsCount, status, total_price, id], function(err) {
+          if (err) {
+            console.error('Ошибка при обновлении бронирования:', err);
+            return res.status(500).json({ message: 'Ошибка сервера при обновлении бронирования' });
+          }
+          
+          // Обновляем доступные места для мероприятия
+          if (additionalTickets !== 0) {
+            const updateEventQuery = `
+              UPDATE events 
+              SET available_seats = available_seats - ? 
+              WHERE id = ?
+            `;
+            
+            db.run(updateEventQuery, [additionalTickets, booking.event_id], function(err) {
+              if (err) {
+                console.error('Ошибка при обновлении доступных мест:', err);
+                // Откатываем изменения в бронировании, если не удалось обновить доступные места
+                db.run(
+                  'UPDATE bookings SET tickets_count = ?, status = ?, total_price = ? WHERE id = ?',
+                  [booking.tickets_count, booking.status, booking.total_price, id],
+                  (rollbackErr) => {
+                    if (rollbackErr) {
+                      console.error('Ошибка при откате изменений бронирования:', rollbackErr);
+                    }
+                  }
+                );
+                return res.status(500).json({ message: 'Ошибка сервера при обновлении доступных мест' });
+              }
+              
+              // Получаем обновленное бронирование для возврата в ответе
+              db.get('SELECT * FROM bookings WHERE id = ?', [id], (err, updatedBooking) => {
+                if (err) {
+                  console.error('Ошибка при получении обновленного бронирования:', err);
+                  return res.status(200).json({ 
+                    message: 'Бронирование успешно обновлено',
+                    booking_id: id
+                  });
+                }
+                
+                res.status(200).json({ 
+                  message: 'Бронирование успешно обновлено',
+                  booking_id: id,
+                  booking: updatedBooking
+                });
+              });
+            });
+          } else {
+            // Если количество мест не изменилось, сразу возвращаем результат
+            db.get('SELECT * FROM bookings WHERE id = ?', [id], (err, updatedBooking) => {
+              if (err) {
+                console.error('Ошибка при получении обновленного бронирования:', err);
+                return res.status(200).json({ 
+                  message: 'Бронирование успешно обновлено',
+                  booking_id: id
+                });
+              }
+              
+              res.status(200).json({ 
+                message: 'Бронирование успешно обновлено',
+                booking_id: id,
+                booking: updatedBooking
+              });
+            });
+          }
         });
       });
     });
-  });
+  } catch (error) {
+    console.error('Непредвиденная ошибка при обновлении бронирования:', error);
+    res.status(500).json({ message: 'Ошибка сервера при обновлении бронирования' });
+  }
 });
 
 module.exports = router; 

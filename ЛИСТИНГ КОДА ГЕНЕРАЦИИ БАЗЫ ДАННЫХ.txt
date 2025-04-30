@@ -1,0 +1,297 @@
+# ЛИСТИНГ КОДА ГЕНЕРАЦИИ БАЗЫ ДАННЫХ СИСТЕМЫ БРОНИРОВАНИЯ МЕРОПРИЯТИЙ
+
+## 1. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ (server/index.js)
+
+```javascript
+// Создание и подключение к БД
+const db = new sqlite3.Database('./database.sqlite', (err) => {
+  if (err) {
+    console.error('Ошибка при подключении к БД:', err.message);
+  } else {
+    console.log('Подключение к SQLite установлено');
+    initializeDatabase();
+  }
+});
+```
+
+## 2. ИНИЦИАЛИЗАЦИЯ СТРУКТУРЫ БАЗЫ ДАННЫХ (server/index.js)
+
+```javascript
+// Инициализация базы данных
+function initializeDatabase() {
+  db.serialize(() => {
+    // Таблица пользователей
+    db.run(`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      role TEXT CHECK (role IN ('client', 'admin')) NOT NULL DEFAULT 'client',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    // Таблица мероприятий
+    db.run(`CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      date_time DATETIME NOT NULL,
+      location TEXT NOT NULL,
+      total_seats INTEGER NOT NULL,
+      available_seats INTEGER NOT NULL,
+      price REAL NOT NULL,
+      image_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    // Таблица бронирований
+    db.run(`CREATE TABLE IF NOT EXISTS bookings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      event_id INTEGER NOT NULL,
+      tickets_count INTEGER NOT NULL,
+      total_price REAL NOT NULL,
+      status TEXT CHECK (status IN ('pending', 'confirmed', 'cancelled')) DEFAULT 'confirmed',
+      ticket_sent INTEGER DEFAULT 0,
+      booking_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id),
+      FOREIGN KEY (event_id) REFERENCES events (id)
+    )`);
+
+    // Создаем администратора по умолчанию, если его нет
+    const adminEmail = 'admin@example.com';
+    db.get('SELECT id FROM users WHERE email = ?', [adminEmail], async (err, row) => {
+      if (err) {
+        console.error('Ошибка при проверке администратора:', err.message);
+      } else if (!row) {
+        // Создаем админа
+        const hashedPassword = await bcrypt.hash('admin123', 10);
+        db.run(
+          'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+          ['Администратор', adminEmail, hashedPassword, 'admin'],
+          function (err) {
+            if (err) {
+              console.error('Ошибка при создании администратора:', err.message);
+            } else {
+              console.log('Администратор создан с ID:', this.lastID);
+            }
+          }
+        );
+      }
+    });
+
+    // Добавляем тестовые мероприятия, если их нет
+    db.get('SELECT COUNT(*) as count FROM events', [], (err, row) => {
+      if (err) {
+        console.error('Ошибка при проверке мероприятий:', err.message);
+        return;
+      }
+
+      if (row.count === 0) {
+        console.log('Добавление тестовых мероприятий...');
+        
+        // Массив тестовых мероприятий
+        const testEvents = [
+          {
+            title: 'Концерт "Классика под звездами"',
+            description: 'Насладитесь величайшими произведениями классической музыки в исполнении симфонического оркестра под открытым ночным небом. Вас ждут произведения Моцарта, Бетховена, Чайковского и других великих композиторов.',
+            date_time: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // через неделю
+            location: 'Центральный парк, Главная сцена',
+            total_seats: 500,
+            available_seats: 500,
+            price: 1500,
+            image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Фестиваль современного искусства',
+            description: 'Трехдневный фестиваль современного искусства, включающий выставки, перформансы, лекции и мастер-классы от ведущих художников и кураторов. Окунитесь в мир инноваций и творческих экспериментов.',
+            date_time: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // через две недели
+            location: 'Музей современного искусства',
+            total_seats: 350,
+            available_seats: 350,
+            price: 1200,
+            image_url: 'https://images.unsplash.com/photo-1594756202469-9ff9799b2e4e?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Театральная премьера "Тени прошлого"',
+            description: 'Драматическая постановка по мотивам бестселлера Александра Волкова. История о сложных семейных отношениях, тайнах прошлого и поиске собственного пути. В главных ролях: Михаил Сергеев и Анна Петрова.',
+            date_time: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(), // через 5 дней
+            location: 'Драматический театр им. А.С. Пушкина',
+            total_seats: 200,
+            available_seats: 200,
+            price: 2500,
+            image_url: 'https://images.unsplash.com/photo-1503095396549-807759245b35?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Мастер-класс по гончарному искусству',
+            description: 'Приглашаем на творческий мастер-класс по гончарному мастерству от известного керамиста Елены Морозовой. Вы научитесь работать на гончарном круге и создадите свое первое изделие из глины, которое сможете забрать с собой после обжига.',
+            date_time: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), // через 3 дня
+            location: 'Творческая студия "Глиняный дворик"',
+            total_seats: 15,
+            available_seats: 15,
+            price: 3500,
+            image_url: 'https://images.unsplash.com/photo-1556367625-b0c725b4b391?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Бизнес-конференция "Инновации в маркетинге"',
+            description: 'Ежегодная конференция для предпринимателей, маркетологов и руководителей. Ведущие эксперты рынка поделятся актуальными трендами, стратегиями и практическими кейсами успешного маркетинга в новых экономических условиях.',
+            date_time: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(), // через 3 недели
+            location: 'Бизнес-центр "Панорама", Конференц-зал "Премиум"',
+            total_seats: 150,
+            available_seats: 150,
+            price: 7500,
+            image_url: 'https://images.unsplash.com/photo-1560523159-4a9692d222f9?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Джазовый вечер с трио "Black Notes"',
+            description: 'Вечер живой джазовой музыки в исполнении знаменитого трио "Black Notes". В программе: классические джазовые композиции и авторские произведения. Специальный гость - вокалистка Мария Станиславская.',
+            date_time: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(), // через 10 дней
+            location: 'Джаз-клуб "Blue Bird"',
+            total_seats: 80,
+            available_seats: 80,
+            price: 2000,
+            image_url: 'https://images.unsplash.com/photo-1485579149621-3123dd979885?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Кулинарный мастер-класс "Секреты итальянской кухни"',
+            description: 'Погрузитесь в мир итальянской кухни с шеф-поваром Марко Росси. Вы научитесь готовить настоящую домашнюю пасту, соус карбонара и классический тирамису. Все необходимые ингредиенты включены в стоимость.',
+            date_time: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(), // через 4 дня
+            location: 'Кулинарная студия "Bon Appetit"',
+            total_seats: 20,
+            available_seats: 20,
+            price: 4500,
+            image_url: 'https://images.unsplash.com/photo-1551218808-94e220e084d2?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          },
+          {
+            title: 'Выставка "Загадки древних цивилизаций"',
+            description: 'Уникальная экспозиция артефактов древних цивилизаций из коллекций нескольких мировых музеев. Вы увидите редчайшие экспонаты: древнеегипетские папирусы, месопотамские таблички, предметы искусства инков и майя.',
+            date_time: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString(), // через 8 дней
+            location: 'Исторический музей, Главный выставочный зал',
+            total_seats: 300,
+            available_seats: 300,
+            price: 900,
+            image_url: 'https://images.unsplash.com/photo-1560416313-414b33c856a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+          }
+        ];
+
+        // Вставляем тестовые мероприятия в базу данных
+        const stmt = db.prepare(`
+          INSERT INTO events 
+          (title, description, date_time, location, total_seats, available_seats, price, image_url) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        testEvents.forEach(event => {
+          stmt.run(
+            event.title,
+            event.description,
+            event.date_time,
+            event.location,
+            event.total_seats,
+            event.available_seats,
+            event.price,
+            event.image_url
+          );
+        });
+
+        stmt.finalize();
+        console.log('Тестовые мероприятия добавлены успешно!');
+      }
+    });
+  });
+}
+```
+
+## 3. СТРУКТУРА БАЗЫ ДАННЫХ
+
+### 3.1 Таблица пользователей (users)
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | Уникальный идентификатор пользователя |
+| name | TEXT NOT NULL | Имя пользователя |
+| email | TEXT UNIQUE NOT NULL | Уникальный email пользователя |
+| password | TEXT NOT NULL | Хешированный пароль пользователя |
+| role | TEXT CHECK (role IN ('client', 'admin')) | Роль пользователя: клиент или администратор |
+| created_at | DATETIME DEFAULT CURRENT_TIMESTAMP | Дата и время создания аккаунта |
+
+### 3.2 Таблица мероприятий (events)
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | Уникальный идентификатор мероприятия |
+| title | TEXT NOT NULL | Название мероприятия |
+| description | TEXT | Описание мероприятия |
+| date_time | DATETIME NOT NULL | Дата и время проведения |
+| location | TEXT NOT NULL | Место проведения |
+| total_seats | INTEGER NOT NULL | Общее количество мест |
+| available_seats | INTEGER NOT NULL | Доступное количество мест |
+| price | REAL NOT NULL | Стоимость билета |
+| image_url | TEXT | URL изображения мероприятия |
+| created_at | DATETIME DEFAULT CURRENT_TIMESTAMP | Дата и время добавления мероприятия |
+
+### 3.3 Таблица бронирований (bookings)
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | Уникальный идентификатор бронирования |
+| user_id | INTEGER NOT NULL | ID пользователя (внешний ключ) |
+| event_id | INTEGER NOT NULL | ID мероприятия (внешний ключ) |
+| tickets_count | INTEGER NOT NULL | Количество забронированных билетов |
+| total_price | REAL NOT NULL | Общая стоимость бронирования |
+| status | TEXT CHECK (status IN ('pending', 'confirmed', 'cancelled')) | Статус бронирования |
+| ticket_sent | INTEGER DEFAULT 0 | Флаг отправки билета (0/1) |
+| booking_date | DATETIME DEFAULT CURRENT_TIMESTAMP | Дата и время бронирования |
+
+## 4. СВЯЗИ МЕЖДУ ТАБЛИЦАМИ
+
+1. **users ⟷ bookings**: Связь один-ко-многим через поле `user_id` в таблице `bookings`
+   - Один пользователь может иметь много бронирований
+   - Каждое бронирование принадлежит только одному пользователю
+
+2. **events ⟷ bookings**: Связь один-ко-многим через поле `event_id` в таблице `bookings`
+   - Одно мероприятие может иметь много бронирований
+   - Каждое бронирование относится только к одному мероприятию
+
+## 5. СОЗДАНИЕ НАЧАЛЬНЫХ ДАННЫХ
+
+### 5.1 Создание администратора по умолчанию
+
+```javascript
+// Создаем администратора по умолчанию, если его нет
+const adminEmail = 'admin@example.com';
+db.get('SELECT id FROM users WHERE email = ?', [adminEmail], async (err, row) => {
+  if (err) {
+    console.error('Ошибка при проверке администратора:', err.message);
+  } else if (!row) {
+    // Создаем админа
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    db.run(
+      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+      ['Администратор', adminEmail, hashedPassword, 'admin']
+    );
+  }
+});
+```
+
+### 5.2 Создание тестовых мероприятий
+
+В базу данных добавляются тестовые мероприятия, включающие:
+- Концерты и музыкальные мероприятия
+- Выставки и фестивали
+- Театральные представления
+- Мастер-классы и обучающие мероприятия
+- Бизнес-конференции
+
+Для каждого мероприятия указывается:
+- Название и описание
+- Дата и место проведения
+- Количество доступных мест
+- Стоимость билета
+- URL изображения
+
+## 6. ЗАКЛЮЧЕНИЕ
+
+Представленный код генерации базы данных создает полноценную структуру для системы бронирования мероприятий. База данных содержит необходимые таблицы с соответствующими полями и ограничениями, а также первоначальные данные для тестирования функциональности системы.
+
+SQLite выбран в качестве СУБД благодаря своей простоте, отсутствию необходимости в отдельном сервере и эффективности для приложений с небольшой и средней нагрузкой. База данных хранится в файле `database.sqlite` в корневой директории сервера. 

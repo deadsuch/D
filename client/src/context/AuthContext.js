@@ -16,24 +16,46 @@ export const AuthProvider = ({ children }) => {
 
   // Проверяем, авторизован ли пользователь, при загрузке компонента
   useEffect(() => {
+    let isMounted = true;
+    
     const checkUserLoggedIn = async () => {
       if (token) {
         try {
           const userData = await authAPI.getProfile();
-          setCurrentUser(userData);
+          if (isMounted) {
+            setCurrentUser(userData);
+          }
         } catch (err) {
           console.error('Ошибка проверки авторизации:', err);
-          // Если токен недействителен, очищаем данные
-          logout();
+          // Если токен недействителен, очищаем данные и обновляем токен
+          if (isMounted) {
+            logout();
+            
+            // Попробуем снова получить токен из localStorage
+            // В некоторых случаях localStorage и состояние могут рассинхронизироваться
+            const freshToken = localStorage.getItem('token');
+            if (freshToken && freshToken !== token) {
+              setToken(freshToken);
+            }
+          }
         } finally {
-          setLoading(false);
+          if (isMounted) {
+            setLoading(false);
+          }
         }
       } else {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
     
     checkUserLoggedIn();
+    
+    // Очистка эффекта
+    return () => {
+      isMounted = false;
+    };
   }, [token]);
 
   // Регистрация нового пользователя

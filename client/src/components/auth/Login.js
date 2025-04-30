@@ -85,7 +85,7 @@ const Login = () => {
   // Демо-аккаунты для быстрого входа
   const demoAccounts = [
     { type: 'admin', email: 'admin@example.com', password: 'admin123' },
-    { type: 'user', email: 'user@example.com', password: 'user123' }
+    { type: 'user', email: '1@gmail.com', password: '111111' }
   ];
 
   const handleDemoLogin = async (account) => {

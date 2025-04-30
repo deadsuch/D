@@ -42,6 +42,7 @@ const fetchWithAuth = async (url, options = {}) => {
   };
 
   try {
+    console.log(`Отправка запроса: ${url}`, config);
     const response = await fetch(`${API_URL}${url}`, config);
     
     // Проверяем код статуса ответа
@@ -49,21 +50,29 @@ const fetchWithAuth = async (url, options = {}) => {
       // Пытаемся получить детали ошибки из JSON
       let errorData;
       try {
-        errorData = await response.json();
+        // Клонируем ответ перед чтением для предотвращения ошибки "body stream already read"
+        const errorResponse = response.clone();
+        errorData = await errorResponse.json();
+        console.error('Детали ошибки сервера:', errorData);
       } catch (e) {
         // Если не можем получить JSON, используем текст ответа
         const errorText = await response.text();
+        console.error('Текст ошибки сервера:', errorText);
         throw new Error(`Ошибка ${response.status}: ${errorText}`);
       }
-      throw new Error(errorData.error || `Ошибка сервера: ${response.status}`);
+      throw new Error(errorData.error || errorData.message || `Ошибка сервера: ${response.status}`);
     }
 
     // Пытаемся разобрать JSON-ответ
     const data = await response.json();
+    console.log(`Ответ от сервера: ${url}`, data);
     return data;
   } catch (error) {
     // Улучшенная обработка ошибок
     console.error('API Error:', error);
+    if (error.message.includes('Ошибка сервера при обновлении бронирования')) {
+      throw new Error('Не удалось обновить бронирование. Пожалуйста, проверьте введенные данные.');
+    }
     throw error;
   }
 };
@@ -191,9 +200,21 @@ export const bookingsAPI = {
 
   // Обновление бронирования
   update: (id, bookingData) => {
+    if (!id) {
+      return Promise.reject(new Error('ID бронирования не указан'));
+    }
+    
+    // Проверяем и форматируем данные перед отправкой
+    const formattedData = {
+      tickets_count: parseInt(bookingData.tickets_count) || 1,
+      status: bookingData.status || 'confirmed'
+    };
+    
+    console.log('Форматированные данные для обновления:', formattedData);
+    
     return fetchWithAuth(`/bookings/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(bookingData)
+      body: JSON.stringify(formattedData)
     });
   },
 

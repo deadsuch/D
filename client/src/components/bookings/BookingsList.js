@@ -36,6 +36,38 @@ const BookingsList = () => {
       minute: '2-digit'
     }).format(date);
   };
+  
+  // Получение текста статуса бронирования
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'confirmed':
+        return 'Подтверждено';
+      case 'cancelled':
+        return 'Отменено';
+      case 'completed':
+        return 'Завершено';
+      case 'pending':
+        return 'Ожидает подтверждения';
+      default:
+        return 'Подтверждено';
+    }
+  };
+  
+  // Получение класса для отображения статуса
+  const getStatusBadgeClass = (status) => {
+    switch (status) {
+      case 'confirmed':
+        return 'bg-success';
+      case 'cancelled':
+        return 'bg-danger';
+      case 'completed':
+        return 'bg-info';
+      case 'pending':
+        return 'bg-warning';
+      default:
+        return 'bg-success';
+    }
+  };
 
   // Отмена бронирования
   const handleCancelBooking = async (id) => {
@@ -83,6 +115,7 @@ const BookingsList = () => {
               <th>Количество билетов</th>
               <th>Общая стоимость</th>
               <th>Дата бронирования</th>
+              <th>Статус</th>
               <th>Действия</th>
             </tr>
           </thead>
@@ -99,6 +132,11 @@ const BookingsList = () => {
                 <td>{booking.tickets_count}</td>
                 <td>{booking.total_price} ₽</td>
                 <td>{formatDate(booking.booking_date)}</td>
+                <td>
+                  <span className={`badge ${getStatusBadgeClass(booking.status)}`}>
+                    {getStatusText(booking.status)}
+                  </span>
+                </td>
                 <td>
                   <Link 
                     to={`/bookings/${booking.id}/ticket`} 

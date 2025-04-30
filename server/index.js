@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const db = require('./database'); // Импортируем базу данных из модуля
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -15,16 +15,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-
-// Создание и подключение к БД
-const db = new sqlite3.Database('./database.sqlite', (err) => {
-  if (err) {
-    console.error('Ошибка при подключении к БД:', err.message);
-  } else {
-    console.log('Подключение к SQLite установлено');
-    initializeDatabase();
-  }
-});
 
 // Инициализация базы данных
 function initializeDatabase() {
@@ -210,6 +200,9 @@ function initializeDatabase() {
   });
 }
 
+// Вызываем инициализацию базы данных
+initializeDatabase();
+
 // Middleware для проверки авторизации
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -218,7 +211,10 @@ const authenticateToken = (req, res, next) => {
   if (!token) return res.status(401).json({ error: 'Требуется авторизация' });
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Недействительный токен' });
+    if (err) {
+      console.error('Ошибка верификации токена:', err.message);
+      return res.status(403).json({ error: 'Недействительный токен' });
+    }
     req.user = user;
     next();
   });
@@ -226,11 +222,22 @@ const authenticateToken = (req, res, next) => {
 
 // Middleware для проверки роли администратора
 const isAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+  
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Недостаточно прав' });
   }
   next();
 };
+
+// Middleware теперь импортируется из middleware/auth.js
+const { authenticateToken: authMiddleware, isAdmin: adminMiddleware } = require('./middleware/auth');
+
+// Экспортируем middleware для использования в других файлах
+// exports.authenticateToken = authenticateToken;
+// exports.isAdmin = isAdmin;
 
 // Маршруты аутентификации
 app.post('/api/register', async (req, res) => {
@@ -331,7 +338,7 @@ app.post('/api/login', (req, res) => {
   }
 });
 
-// API для мероприятий
+// API для получения всех мероприятий
 app.get('/api/events', (req, res) => {
   db.all('SELECT * FROM events ORDER BY date_time', [], (err, rows) => {
     if (err) {
@@ -341,6 +348,7 @@ app.get('/api/events', (req, res) => {
   });
 });
 
+// API для получения одного мероприятия
 app.get('/api/events/:id', (req, res) => {
   const { id } = req.params;
   db.get('SELECT * FROM events WHERE id = ?', [id], (err, row) => {
@@ -354,7 +362,8 @@ app.get('/api/events/:id', (req, res) => {
   });
 });
 
-app.post('/api/events', authenticateToken, isAdmin, (req, res) => {
+// API для создания мероприятия (только для админа)
+app.post('/api/events', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const { title, description, date_time, location, total_seats, price, image_url } = req.body;
 
@@ -389,7 +398,8 @@ app.post('/api/events', authenticateToken, isAdmin, (req, res) => {
   }
 });
 
-app.put('/api/events/:id', authenticateToken, isAdmin, (req, res) => {
+// API для обновления мероприятия (только для админа)
+app.put('/api/events/:id', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const { id } = req.params;
     const { title, description, date_time, location, total_seats, available_seats, price, image_url } = req.body;
@@ -428,7 +438,7 @@ app.put('/api/events/:id', authenticateToken, isAdmin, (req, res) => {
   }
 });
 
-app.delete('/api/events/:id', authenticateToken, isAdmin, (req, res) => {
+app.delete('/api/events/:id', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const { id } = req.params;
 
@@ -446,172 +456,8 @@ app.delete('/api/events/:id', authenticateToken, isAdmin, (req, res) => {
   }
 });
 
-// API для бронирований
-app.post('/api/bookings', authenticateToken, (req, res) => {
-  try {
-    const { event_id, tickets_count } = req.body;
-    const user_id = req.user.id;
-
-    if (!event_id || !tickets_count || tickets_count <= 0) {
-      return res.status(400).json({ error: 'Некорректные данные для бронирования' });
-    }
-
-    // Получаем информацию о мероприятии
-    db.get('SELECT * FROM events WHERE id = ?', [event_id], (err, event) => {
-      if (err) {
-        return res.status(500).json({ error: 'Ошибка при получении мероприятия' });
-      }
-      if (!event) {
-        return res.status(404).json({ error: 'Мероприятие не найдено' });
-      }
-      if (event.available_seats < tickets_count) {
-        return res.status(400).json({ error: 'Недостаточно свободных мест' });
-      }
-
-      // Обновляем количество доступных мест
-      const newAvailableSeats = event.available_seats - tickets_count;
-      const totalPrice = event.price * tickets_count;
-
-      db.run(
-        'UPDATE events SET available_seats = ? WHERE id = ?',
-        [newAvailableSeats, event_id],
-        function (err) {
-          if (err) {
-            return res.status(500).json({ error: 'Ошибка при обновлении доступных мест' });
-          }
-
-          // Создаем бронирование
-          db.run(
-            'INSERT INTO bookings (user_id, event_id, tickets_count, total_price) VALUES (?, ?, ?, ?)',
-            [user_id, event_id, tickets_count, totalPrice],
-            function (err) {
-              if (err) {
-                return res.status(500).json({ error: 'Ошибка при создании бронирования' });
-              }
-
-              res.status(201).json({
-                id: this.lastID,
-                user_id,
-                event_id,
-                tickets_count,
-                total_price: totalPrice,
-                booking_date: new Date(),
-                event_title: event.title
-              });
-            }
-          );
-        }
-      );
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Ошибка сервера' });
-  }
-});
-
-app.get('/api/bookings', authenticateToken, (req, res) => {
-  const userId = req.user.id;
-  const isAdmin = req.user.role === 'admin';
-  
-  // Если админ, показываем все бронирования, иначе только пользователя
-  const query = isAdmin
-    ? `SELECT b.*, e.title as event_title, u.name as user_name 
-       FROM bookings b 
-       JOIN events e ON b.event_id = e.id 
-       JOIN users u ON b.user_id = u.id 
-       ORDER BY b.booking_date DESC`
-    : `SELECT b.*, e.title as event_title 
-       FROM bookings b 
-       JOIN events e ON b.event_id = e.id 
-       WHERE b.user_id = ? 
-       ORDER BY b.booking_date DESC`;
-  
-  const params = isAdmin ? [] : [userId];
-
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: 'Ошибка при получении бронирований' });
-    }
-    res.json(rows);
-  });
-});
-
-app.get('/api/bookings/:id', authenticateToken, (req, res) => {
-  const { id } = req.params;
-  const userId = req.user.id;
-  const isAdmin = req.user.role === 'admin';
-  
-  // Если админ, можно просматривать любое бронирование, иначе только свои
-  const query = isAdmin
-    ? `SELECT b.*, e.title as event_title, u.name as user_name 
-       FROM bookings b 
-       JOIN events e ON b.event_id = e.id 
-       JOIN users u ON b.user_id = u.id 
-       WHERE b.id = ?`
-    : `SELECT b.*, e.title as event_title 
-       FROM bookings b 
-       JOIN events e ON b.event_id = e.id 
-       WHERE b.id = ? AND b.user_id = ?`;
-  
-  const params = isAdmin ? [id] : [id, userId];
-
-  db.get(query, params, (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: 'Ошибка при получении бронирования' });
-    }
-    if (!row) {
-      return res.status(404).json({ error: 'Бронирование не найдено' });
-    }
-    res.json(row);
-  });
-});
-
-app.delete('/api/bookings/:id', authenticateToken, (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
-    const isAdmin = req.user.role === 'admin';
-    
-    // Получаем бронирование
-    const bookingQuery = isAdmin
-      ? 'SELECT * FROM bookings WHERE id = ?'
-      : 'SELECT * FROM bookings WHERE id = ? AND user_id = ?';
-    
-    const bookingParams = isAdmin ? [id] : [id, userId];
-    
-    db.get(bookingQuery, bookingParams, (err, booking) => {
-      if (err) {
-        return res.status(500).json({ error: 'Ошибка при получении бронирования' });
-      }
-      if (!booking) {
-        return res.status(404).json({ error: 'Бронирование не найдено' });
-      }
-      
-      // Возвращаем билеты в доступные места
-      db.run(
-        'UPDATE events SET available_seats = available_seats + ? WHERE id = ?',
-        [booking.tickets_count, booking.event_id],
-        (err) => {
-          if (err) {
-            return res.status(500).json({ error: 'Ошибка при обновлении мест' });
-          }
-          
-          // Удаляем бронирование
-          db.run('DELETE FROM bookings WHERE id = ?', [id], function (err) {
-            if (err) {
-              return res.status(500).json({ error: 'Ошибка при удалении бронирования' });
-            }
-            res.json({ message: 'Бронирование успешно отменено' });
-          });
-        }
-      );
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Ошибка сервера' });
-  }
-});
-
 // API для получения информации о пользователе
-app.get('/api/users/profile', authenticateToken, (req, res) => {
+app.get('/api/users/profile', authMiddleware, (req, res) => {
   const userId = req.user.id;
   
   db.get('SELECT id, name, email, role FROM users WHERE id = ?', [userId], (err, user) => {
@@ -626,7 +472,7 @@ app.get('/api/users/profile', authenticateToken, (req, res) => {
 });
 
 // API для обновления профиля
-app.put('/api/users/profile', authenticateToken, (req, res) => {
+app.put('/api/users/profile', authMiddleware, (req, res) => {
   try {
     const userId = req.user.id;
     const { name, email } = req.body;
@@ -667,7 +513,7 @@ app.put('/api/users/profile', authenticateToken, (req, res) => {
 });
 
 // API для смены пароля
-app.put('/api/users/change-password', authenticateToken, async (req, res) => {
+app.put('/api/users/change-password', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
     const { currentPassword, newPassword } = req.body;
@@ -712,7 +558,7 @@ app.put('/api/users/change-password', authenticateToken, async (req, res) => {
 });
 
 // API для получения статистики (только для админов)
-app.get('/api/stats', authenticateToken, isAdmin, (req, res) => {
+app.get('/api/stats', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const stats = {};
     
@@ -753,6 +599,10 @@ app.get('/api/stats', authenticateToken, isAdmin, (req, res) => {
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
+
+// Подключение маршрутизаторов
+const bookingsRouter = require('./routes/bookings');
+app.use('/api/bookings', bookingsRouter);
 
 // Запуск сервера
 app.listen(PORT, () => {
